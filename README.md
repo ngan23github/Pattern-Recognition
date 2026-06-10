@@ -51,7 +51,7 @@ Do dung lượng lớn, dataset không được lưu trực tiếp trong repo. T
 | Dataset | Mô tả | Link |
 |---|---|---|
 | Fruit 360 | Data gốc, ~90k ảnh, nền trắng | [Kaggle](https://www.kaggle.com/datasets/moltean/fruits) |
-| Data đang dùng | Data đã được merged lại với nhau | [Google Drive](https://drive.google.com/file/d/1_FWHCbA7YflZKAl0ogdZBJErEHZ8G58T/view?usp=drive_link) |
+| Data đang dùng | Data đã được merged lại với nhau | [Google Drive](https://drive.google.com/file/d/1AtL0axJoFnEvIaZkjwetJH-BGMaSznqW/view?usp=drive_link) |
 
 Sau khi tải về, giải nén và đặt vào đúng cấu trúc thư mục `data/` như mô tả ở trên.
 
