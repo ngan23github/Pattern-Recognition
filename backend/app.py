@@ -1,5 +1,6 @@
 import os
 import io
+import base64
 import torch
 import torch.nn as nn
 from torchvision import models, transforms
@@ -10,7 +11,6 @@ import numpy as np
 from pathlib import Path
 
 try:
-    # pyrefly: ignore [missing-import]
     from rembg import remove as rembg_remove
     REMBG_AVAILABLE = True
 except ImportError:
@@ -22,13 +22,16 @@ try:
 except ImportError:
     YOLO_AVAILABLE = False
 
-app = FastAPI(title="Fruit Recognition API", description="API to recognize fruits from images using YOLOv8 and EfficientNet")
+app = FastAPI(
+    title="Fruit Recognition API",
+    description="API to recognize fruits from images using YOLOv8 and EfficientNet-B0"
+)
 
 # --- Configuration ---
 BASE_DIR   = Path(__file__).parent
 MODEL_PATH = str(BASE_DIR / '..' / 'models' / 'best_efficientnetB0.pth')
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-IMG_SIZE = 100
+DEVICE     = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+IMG_SIZE   = 100
 IMAGENET_MEAN = [0.485, 0.456, 0.406]
 IMAGENET_STD  = [0.229, 0.224, 0.225]
 
@@ -39,9 +42,9 @@ val_test_transforms = transforms.Compose([
 ])
 
 # --- Load Models ---
-class_names = []
+class_names  = []
 effnet_model = None
-yolo_model = None
+yolo_model   = None
 
 def build_efficientnet_b0(num_classes):
     weights = models.EfficientNet_B0_Weights.IMAGENET1K_V1
@@ -59,14 +62,14 @@ def build_efficientnet_b0(num_classes):
 @app.on_event("startup")
 def load_all_models():
     global effnet_model, class_names, yolo_model
-    
+
     if YOLO_AVAILABLE:
         print("Loading YOLOv8n...")
         yolo_model = YOLO('yolov8n.pt')
-    
+
     print("Loading EfficientNet-B0...")
     if os.path.exists(MODEL_PATH):
-        checkpoint = torch.load(MODEL_PATH, map_location=DEVICE)
+        checkpoint  = torch.load(MODEL_PATH, map_location=DEVICE)
         class_names = checkpoint.get('class_names', [])
         num_classes = len(class_names)
         effnet_model = build_efficientnet_b0(num_classes).to(DEVICE)
@@ -74,59 +77,63 @@ def load_all_models():
         effnet_model.eval()
         print(f"✅ Loaded Fruit Model with {num_classes} classes.")
     else:
-        print(f"⚠️ Warning: Model not found at {MODEL_PATH}")
+        print(f"⚠️  Warning: Model not found at {MODEL_PATH}")
 
 # --- Helper Functions ---
+def pil_to_base64(img: Image.Image, fmt: str = "PNG") -> str:
+    """Convert PIL image to base64 string."""
+    buf = io.BytesIO()
+    img.save(buf, format=fmt)
+    return base64.b64encode(buf.getvalue()).decode("utf-8")
+
 def detect_objects(image_pil, conf=0.25):
     W, H = image_pil.size
     if yolo_model is None:
         return [np.array([0, 0, W, H])], ['full_image']
-    
-    results = yolo_model(image_pil, conf=conf, verbose=False)[0]
-    boxes_out, labels_out = [], []
+
+    results    = yolo_model(image_pil, conf=conf, verbose=False)[0]
+    boxes_out  = []
+    labels_out = []
     for box in results.boxes:
         cls_id = int(box.cls.item())
         xyxy   = box.xyxy[0].cpu().numpy().astype(int)
         label  = yolo_model.names[cls_id]
         boxes_out.append(xyxy)
         labels_out.append(label)
-        
+
     if not boxes_out:
-        boxes_out = [np.array([0, 0, W, H])]
+        boxes_out  = [np.array([0, 0, W, H])]
         labels_out = ['full_image']
     return boxes_out, labels_out
 
 def crop_with_padding(image_pil, box, pad=15):
     W, H = image_pil.size
     x1, y1, x2, y2 = box
-    w_box = x2 - x1
-    h_box = y2 - y1
-    side = max(w_box, h_box) + pad * 2
-    
+    side = max(x2 - x1, y2 - y1) + pad * 2
+
     center_x = (x1 + x2) // 2
     center_y = (y1 + y2) // 2
-    
+
     x1p = max(0, center_x - side // 2)
     y1p = max(0, center_y - side // 2)
     x2p = min(W, center_x + side // 2)
     y2p = min(H, center_y + side // 2)
-    
-    cropped = image_pil.crop((x1p, y1p, x2p, y2p))
+
+    cropped    = image_pil.crop((x1p, y1p, x2p, y2p))
     square_img = Image.new('RGB', (side, side), (255, 255, 255))
-    paste_x = (side - cropped.size[0]) // 2
-    paste_y = (side - cropped.size[1]) // 2
-    square_img.paste(cropped, (paste_x, paste_y))
+    square_img.paste(cropped, ((side - cropped.size[0]) // 2,
+                               (side - cropped.size[1]) // 2))
     return square_img
 
 def remove_background(image_pil):
     if not REMBG_AVAILABLE:
         return image_pil.convert('RGB')
     try:
-        img_rgba = rembg_remove(
-            image_pil, 
-            alpha_matting=True, 
-            alpha_matting_foreground_threshold=240, 
-            alpha_matting_background_threshold=10, 
+        img_rgba   = rembg_remove(
+            image_pil,
+            alpha_matting=True,
+            alpha_matting_foreground_threshold=240,
+            alpha_matting_background_threshold=10,
             alpha_matting_erode_size=10
         )
         background = Image.new('RGB', img_rgba.size, (255, 255, 255))
@@ -140,15 +147,14 @@ def remove_background(image_pil):
 def classify_crop(crop_pil, top_k=5):
     if effnet_model is None:
         return {"error": "Model not loaded"}
-    
-    tensor = val_test_transforms(crop_pil).unsqueeze(0).to(DEVICE)
-    logits = effnet_model(tensor)
-    probs  = torch.softmax(logits, dim=1)
-    
+
+    tensor     = val_test_transforms(crop_pil).unsqueeze(0).to(DEVICE)
+    logits     = effnet_model(tensor)
+    probs      = torch.softmax(logits, dim=1)
     top_probs, top_idxs = probs.topk(top_k, dim=1)
-    top_probs = top_probs.squeeze().cpu().numpy()
-    top_idxs  = top_idxs.squeeze().cpu().numpy()
-    
+    top_probs  = top_probs.squeeze().cpu().numpy()
+    top_idxs   = top_idxs.squeeze().cpu().numpy()
+
     results = [
         {'class': class_names[i], 'confidence': float(p)}
         for p, i in zip(top_probs, top_idxs)
@@ -167,34 +173,35 @@ def read_root():
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
     if effnet_model is None:
-        return JSONResponse(status_code=500, content={"error": "Fruit model is not loaded (check models/best_efficientnetB0.pth)."})
-        
+        return JSONResponse(
+            status_code=500,
+            content={"error": "Fruit model is not loaded (check models/best_efficientnetB0.pth)."}
+        )
+
     try:
         image_bytes = await file.read()
-        image_pil = Image.open(io.BytesIO(image_bytes))
-        image_pil = ImageOps.exif_transpose(image_pil).convert('RGB')
+        image_pil   = Image.open(io.BytesIO(image_bytes))
+        image_pil   = ImageOps.exif_transpose(image_pil).convert('RGB')
     except Exception as e:
         return JSONResponse(status_code=400, content={"error": f"Invalid image file: {str(e)}"})
 
-    # 1. Detect
     boxes, detect_labels = detect_objects(image_pil)
-    
+
     all_results = []
     for i, (box, det_label) in enumerate(zip(boxes, detect_labels)):
-        # 2. Crop
-        crop = crop_with_padding(image_pil, box)
-        
-        # 3. Remove Background
+        crop       = crop_with_padding(image_pil, box)
         crop_clean = remove_background(crop)
-        
-        # 4. Classify
-        result = classify_crop(crop_clean)
-        
+        result     = classify_crop(crop_clean)
+
+        # ── NEW: encode crop (background removed) as base64 PNG ──
+        crop_b64 = pil_to_base64(crop_clean, fmt="PNG")
+
         all_results.append({
-            'index': i + 1,
-            'box': box.tolist(),
+            'index'       : i + 1,
+            'box'         : box.tolist(),
             'detect_label': det_label,
-            'prediction': result
+            'prediction'  : result,
+            'crop_b64'    : crop_b64,          # ← base64-encoded PNG of the clean crop
         })
 
     return {"results": all_results}
