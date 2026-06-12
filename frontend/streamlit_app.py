@@ -52,6 +52,22 @@ div[data-testid="stButton"] > button:hover {
     background-color: #85C7DF !important;
     box-shadow: 0 4px 12px rgba(168,216,234,0.7) !important;
 }
+
+/* Badge styles */
+.badge-seg {
+    display: inline-block;
+    background: #d4edda; color: #1a5c2e;
+    font-size: 0.7rem; font-weight: 600;
+    padding: 2px 8px; border-radius: 12px;
+    vertical-align: middle; margin-left: 4px;
+}
+.badge-bbox {
+    display: inline-block;
+    background: #fff3cd; color: #856404;
+    font-size: 0.7rem; font-weight: 600;
+    padding: 2px 8px; border-radius: 12px;
+    vertical-align: middle; margin-left: 4px;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -86,45 +102,54 @@ if uploaded_file is not None and st.session_state.get("recognize_btn"):
             image.save(img_byte_arr, format="JPEG")
             img_byte_arr = img_byte_arr.getvalue()
 
-            files = {"file": ("image.jpg", img_byte_arr, "image/jpeg")}
+            files    = {"file": ("image.jpg", img_byte_arr, "image/jpeg")}
             response = requests.post(BACKEND_URL, files=files)
 
             if response.status_code == 200:
-                data = response.json()
-                results = data.get("results", [])
+                data      = response.json()
+                results   = data.get("results", [])
+                n_objects = data.get("n_objects", len(results))
 
                 if not results:
                     st.warning("No fruits detected.")
                 else:
-                    st.success(f"Detected {len(results)} object(s)!")
+                    st.success(f"Detected **{n_objects}** object(s)!")
 
-                    # Draw bounding boxes on a copy
+                    # ── Draw bounding boxes on annotated copy ──────────
                     annotated = image.copy()
-                    draw = ImageDraw.Draw(annotated)
-                    colors = ["#FF5733", "#33FF57", "#3357FF", "#F033FF", "#33FFF0"]
+                    draw      = ImageDraw.Draw(annotated)
+                    colors    = ["#FF5733", "#33FF57", "#3357FF", "#F033FF", "#33FFF0"]
 
-                    # Font size scaled to image width
                     font_size = max(20, annotated.width // 30)
                     try:
-                        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", font_size)
+                        font = ImageFont.truetype(
+                            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", font_size
+                        )
                     except Exception:
                         font = ImageFont.load_default(size=font_size)
 
                     for i, res in enumerate(results):
-                        box   = res["box"]
-                        pred  = res["prediction"]
-                        color = colors[i % len(colors)]
-                        label = f"#{res['index']} {pred['top1_class']} ({pred['top1_conf']*100:.1f}%)"
+                        box      = res["box"]
+                        pred     = res["prediction"]
+                        color    = colors[i % len(colors)]
+                        has_mask = res.get("has_seg_mask", False)
+                        mode_tag = "[seg]" if has_mask else "[bbox]"
+                        label    = f"#{res['index']} {pred['top1_class']} ({pred['top1_conf']*100:.1f}%) {mode_tag}"
 
                         draw.rectangle(box, outline=color, width=max(3, font_size // 8))
-                        text_bbox = draw.textbbox((box[0], max(0, box[1] - font_size - 4)), label, font=font)
+                        text_bbox = draw.textbbox(
+                            (box[0], max(0, box[1] - font_size - 4)), label, font=font
+                        )
                         draw.rectangle(
-                            [text_bbox[0] - 2, text_bbox[1] - 2, text_bbox[2] + 2, text_bbox[3] + 2],
+                            [text_bbox[0]-2, text_bbox[1]-2, text_bbox[2]+2, text_bbox[3]+2],
                             fill=color,
                         )
-                        draw.text((box[0], max(0, box[1] - font_size - 4)), label, fill="white", font=font)
+                        draw.text(
+                            (box[0], max(0, box[1] - font_size - 4)),
+                            label, fill="white", font=font
+                        )
 
-                    # Two-column image view
+                    # ── Two-column image view ──────────────────────────
                     st.markdown("## Results")
                     col_orig, col_ann = st.columns(2)
                     with col_orig:
@@ -134,7 +159,7 @@ if uploaded_file is not None and st.session_state.get("recognize_btn"):
                         st.caption("Detected regions")
                         st.image(annotated)
 
-                    # Per-object detail cards — 2 per row
+                    # ── Per-object detail cards — 2 per row ───────────
                     st.markdown("### 🔍 Predictions by Region")
                     for row_start in range(0, len(results), 2):
                         card_left, card_right = st.columns(2, gap="medium")
@@ -142,14 +167,29 @@ if uploaded_file is not None and st.session_state.get("recognize_btn"):
                             [card_left, card_right],
                             results[row_start : row_start + 2],
                         ):
-                            pred  = res["prediction"]
-                            color = colors[(res["index"] - 1) % len(colors)]
+                            pred     = res["prediction"]
+                            color    = colors[(res["index"] - 1) % len(colors)]
+                            has_mask = res.get("has_seg_mask", False)
+
+                            # Badge HTML
+                            if has_mask:
+                                badge = '<span class="badge-seg">✅ Segmentation</span>'
+                            else:
+                                badge = '<span class="badge-bbox">⚠️ BBox fallback</span>'
+
                             with col:
                                 with st.expander(
                                     f"#{res['index']} — {pred['top1_class']}"
-                                    f"  ({pred['top1_conf']*100:.1f}%)  ·  YOLO: {res['detect_label']}",
+                                    f"  ({pred['top1_conf']*100:.1f}%)"
+                                    f"  ·  YOLO: {res['detect_label']}",
                                     expanded=True,
                                 ):
+                                    # Badge + mode line
+                                    st.markdown(
+                                        f"Isolation mode: {badge}",
+                                        unsafe_allow_html=True,
+                                    )
+
                                     thumb_col, info_col = st.columns([1, 2])
 
                                     with thumb_col:
