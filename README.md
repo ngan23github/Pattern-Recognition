@@ -11,6 +11,7 @@
 | Dataset | [Fruit 360](https://www.kaggle.com/datasets/moltean/fruits) |
 | Framework | PyTorch |
 | Mô hình so sánh | Custom CNN · ResNet-18 · EfficientNet-B0 |
+| Mô hình được chọn | **EfficientNet-B0** (tối ưu nhất cho thực tế) |
 | Inference thực tế | YOLOv8 (detect) + rembg (remove background) + Classifier |
 | Triển khai Web | FastAPI (Backend) + Streamlit (Frontend) |
 
@@ -18,28 +19,29 @@
 
 ## 🗂️ Cấu Trúc Thư Mục
 
-```
+```text
 Pattern-Recognition/
 │
-├── fruit_recognition_3models.ipynb  # Notebook huấn luyện & đánh giá 3 model
+├── fruit_recognition.ipynb          # Notebook chính để huấn luyện, đánh giá và giải thích mô hình
+├── yolov8n-seg.pt                   # Pre-trained model YOLOv8 (segmentation) dùng để tách nền
+├── requirements.txt                 # Các thư viện cơ bản cho project
 │
-├── models/                          # Checkpoint đã lưu sau training
+├── models/                          # Nơi lưu trữ checkpoint của các mô hình đã train
 │   ├── best_cnn.pth
 │   ├── best_resnet18.pth
 │   └── best_efficientnetB0.pth
 │
 ├── backend/                         # Backend API code
-│   ├── app.py                       # FastAPI server
-│   └── requirements.txt             # Thư viện cho Backend
+│   ├── app.py                       # FastAPI server xử lý ảnh
+│   └── requirements.txt             # Thư viện riêng cho Backend
 │
 ├── frontend/                        # Frontend UI code
-│   ├── streamlit_app.py             # Ứng dụng Streamlit
-│   └── requirements.txt             # Thư viện cho Frontend
+│   ├── streamlit_app.py             # Giao diện Web App Streamlit
+│   └── requirements.txt             # Thư viện riêng cho Frontend
 │
-└── data/
+└── data/                            # Thư mục chứa dữ liệu
     ├── Training/
-    ├── Test/
-    └── test_real_multiple_fruits/   # Ảnh thực tế để test inference
+    └── Test/
 ```
 
 ---
@@ -51,7 +53,7 @@ Do dung lượng lớn, dataset không được lưu trực tiếp trong repo. T
 | Dataset | Mô tả | Link |
 |---|---|---|
 | Fruit 360 | Data gốc, ~90k ảnh, nền trắng | [Kaggle](https://www.kaggle.com/datasets/moltean/fruits) |
-| Data đang dùng | Data đã được merged lại với nhau | [Google Drive](https://drive.google.com/file/d/1AtL0axJoFnEvIaZkjwetJH-BGMaSznqW/view?usp=drive_link) |
+| Data đang dùng | Data đã được xử lý (gộp lại với nhau) | [Google Drive](https://drive.google.com/file/d/1AtL0axJoFnEvIaZkjwetJH-BGMaSznqW/view?usp=drive_link) |
 
 Sau khi tải về, giải nén và đặt vào đúng cấu trúc thư mục `data/` như mô tả ở trên.
 
@@ -66,13 +68,13 @@ Mạng CNN tự xây dựng từ đầu gồm 4 `ConvBlock` (Conv → BN → ReL
 Fine-tune ResNet-18 pre-trained trên ImageNet với **differential learning rate** — backbone lr thấp hơn FC head 10 lần để bảo toàn features đã học.
 
 ### 3. EfficientNet-B0 (Transfer Learning)
-Fine-tune EfficientNet-B0 — kiến trúc dùng kỹ thuật **Compound Scaling** (đồng thời scale depth, width, resolution). Đạt accuracy cao hơn ResNet-18 với ít tham số hơn.
+Mô hình chiến thắng và được chọn để deploy. So sánh tham số:
 
-| Model | Tham số | Kiến trúc |
-|---|---|---|
-| Custom CNN | ~1.2M | Conv blocks |
-| ResNet-18 | ~11M | Skip connection |
-| EfficientNet-B0 | ~5.3M | MBConv + SE block |
+| Model | Tham số | FLOPs | Kiến trúc |
+|---|---|---|---|
+| Custom CNN | ~1.2M | - | Conv blocks |
+| ResNet-18 | ~11.3M | ~1.8 Tỉ | Skip connection |
+| EfficientNet-B0 | ~4.3M | ~0.39 Tỉ | MBConv + SE block |
 
 ---
 
@@ -85,24 +87,24 @@ Fine-tune EfficientNet-B0 — kiến trúc dùng kỹ thuật **Compound Scaling
 git clone https://github.com/ngan23github/Pattern-Recognition.git
 cd Pattern-Recognition
 
-# Tạo môi trường ảo
+# Tạo môi trường ảo (Git Bash)
 python -m venv venv
-source venv/Scripts/activate   # Git Bash (Windows)
+source venv/Scripts/activate
 
-# Cài các thư viện cần thiết cho Notebook
+# Cài các thư viện cần thiết
 pip install -r requirements.txt
 ```
 
 ### 2. Chạy Notebook Huấn Luyện (Tuỳ chọn)
-Mở và chạy `fruit_recognition_3models.ipynb`.  
-- **Bỏ qua Training**: Code đã được thiết lập `TRAIN_FROM_SCRATCH = False`. Nếu folder `models/` đã có sẵn các file weight `.pth`, hệ thống sẽ tự nạp model và bỏ qua training để tiết kiệm thời gian. (Bạn có thể đổi thành `True` nếu muốn chạy lại từ đầu).
-- Pipeline suy luận ảnh thực tế dùng YOLOv8 + Alpha Matting (chống lẹm) và Letterbox (chống méo hình).
+Mở file `fruit_recognition.ipynb` bằng Jupyter Notebook hoặc VSCode.
+- **Bỏ qua Training**: Code đã được thiết lập `TRAIN_FROM_SCRATCH = False`. Hệ thống sẽ tự nạp model đã train từ thư mục `models/` để tiết kiệm thời gian.
+- Pipeline suy luận được tích hợp trong notebook: Dùng YOLOv8 + Alpha Matting (chống lẹm) và Letterbox (chống méo hình).
 
 ### 3. Chạy Ứng Dụng Web (Model as a Service)
 
 Chúng ta có 2 module độc lập: Backend (AI xử lý) và Frontend (Giao diện hiển thị).
 
-**Bước 1: Cài đặt thư viện Backend và Frontend**
+**Bước 1: Cài đặt thư viện cho Backend và Frontend**
 ```bash
 pip install -r backend/requirements.txt
 pip install -r frontend/requirements.txt
@@ -113,7 +115,7 @@ Mở 1 terminal mới và gõ:
 ```bash
 uvicorn backend.app:app --reload --host 0.0.0.0 --port 8000
 ```
-API nhận diện sẽ chạy tại `http://localhost:8000`. Endpoint để dự đoán là `POST /predict`.
+API nhận diện sẽ chạy tại `http://localhost:8000`. Endpoint dự đoán là `POST /predict`.
 
 **Bước 3: Khởi chạy Giao diện Frontend Streamlit**
 Mở 1 terminal mới (để giữ Backend vẫn chạy ngầm) và gõ:
@@ -128,7 +130,7 @@ streamlit run frontend/streamlit_app.py
 
 Nếu bạn không muốn dùng giao diện Frontend mà muốn gọi trực tiếp Backend API, hãy sử dụng Postman:
 
-1. Tạo một request chọn phương thức **POST**.
+1. Tạo request phương thức **POST**.
 2. URL: `http://localhost:8000/predict`
 3. Ở tab **Body**, chọn **form-data**.
 4. Ở cột `KEY`, nhập `file` và đổi định dạng từ text sang **File**.
